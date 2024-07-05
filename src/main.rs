@@ -20,6 +20,10 @@ fn main() {
                 Ok(res) => println!("{res}"),
                 Err(e) => panic!("{e:?}"),
             },
+            Device(device_commands) => match device_commands.request(&access_token) {
+                Ok(res) => println!("{res}"),
+                Err(e) => panic!("{e:?}"),
+            },
             _ => (),
         }
     }
