@@ -8,9 +8,9 @@ use std::{
 };
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use super::{ChatCommands, DeviceCommands};
+use super::{ChatCommands, DeviceCommands, PushCommands};
 
 pub fn set_access_token(access_token: &str) -> io::Result<()> {
     let home = env::var("HOME").unwrap();
@@ -170,14 +170,13 @@ impl Request for DeviceCommands {
                     .post("https://api.pushbullet.com/v2/devices")
                     .header("Access-Token", access_token);
 
-                if let Some(body) = body {
-                    let json: Value = match serde_json::from_str(body) {
-                        Ok(json) => json,
-                        Err(e) => return Err(Box::new(e)),
-                    };
-                    request_builder = request_builder.json(&json);
-                } else {
-                    let device = Device {
+                let json_data = match body {
+                    Some(body) => {
+                        let json: Value = serde_json::from_str(body)?;
+                        json
+                    },
+                    None => {
+                        let device = Device {
                         nickname,
                         model,
                         manufacturer,
@@ -185,9 +184,11 @@ impl Request for DeviceCommands {
                         app_version,
                         icon,
                         has_sms,
-                    };
-                    request_builder = request_builder.json(&device);
-                }
+                        };
+                        serde_json::to_value(&device)?
+                    }
+                };
+                request_builder = request_builder.json(&json_data);
 
                 match request_builder.send() {
                     Ok(res) => Ok(res.text()?),
@@ -231,6 +232,161 @@ impl Request for DeviceCommands {
 
                 let request_builder = client
                     .delete(format!("https://api.pushbullet.com/v2/devices/{}", iden))
+                    .header("Access-Token", access_token);
+
+                match request_builder.send() {
+                    Ok(res) => Ok(res.text()?),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
+        }
+    }
+}
+
+impl Request for PushCommands {
+
+    fn request(&self, access_token: &str) -> Result<String, Box<dyn Error>> {
+        match self {
+            PushCommands::List(args) => {
+                let client = reqwest::blocking::Client::new();
+
+                let mut request_builder = client
+                    .get("https://api.pushbullet.com/v2/devices")
+                    .header("Access-Token", access_token);
+
+                let mut query: Vec<(String, String)> = vec![];
+                if let Some(modified_after) = &args.modified_after {
+                    query.push((String::from("modified_after"), modified_after.to_string()));
+                }
+                if let Some(active) = &args.active {
+                    query.push((String::from("active"), active.to_string()));
+                }
+                if let Some(cursor) = &args.cursor {
+                    query.push((String::from("cursor"), cursor.to_string()));
+                }
+                if let Some(limit) = &args.limit {
+                    query.push((String::from("limit"), limit.to_string()));
+                }
+                request_builder = request_builder.query(&query);
+
+                match request_builder.send() {
+                    Ok(res) => Ok(res.text()?),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
+            PushCommands::Create {
+                t,
+                title,
+                body,
+                url,
+                file_name,
+                file_type,
+                file_url,
+                source_device_iden,
+                device_iden,
+                client_iden,
+                channel_tag,
+                email,
+                guid,
+            } => {
+                let client = reqwest::blocking::Client::new();
+
+                let mut request_builder = client
+                    .post("https://api.pushbullet.com/v2/devices")
+                    .header("Access-Token", access_token);
+
+                let mut map = HashMap::new();
+                map.insert("type", t);
+                if let Some(source_device_iden) = source_device_iden {
+                    map.insert("source_device_iden", source_device_iden);
+                }
+                if let Some(device_iden) = device_iden {
+                    map.insert("device_iden", device_iden);
+                }
+                if let Some(client_iden) = client_iden {
+                    map.insert("client_iden", client_iden);
+                }
+                if let Some(channel_tag) = channel_tag {
+                    map.insert("channel_tag", channel_tag);
+                }
+                if let Some(email) = email  {
+                    map.insert("email", email);
+                }
+                if let Some(guid) = guid {
+                    map.insert("guid", guid);
+                }
+
+                match t.as_str() {
+                    "note" => {
+                        if let Some(title) = title {
+                            map.insert("title", title);
+                        }
+                        if let Some(body) = body {
+                            map.insert("body", body);
+                        }
+                    },
+                    "link" => {
+                        if let Some(title) = title {
+                            map.insert("title", title);
+                        }
+                        if let Some(body) = body {
+                            map.insert("body", body);
+                        }
+                        if let Some(url) = url {
+                            map.insert("url", url);
+                        }
+                    },
+                    "file" => {
+                        todo!()
+                    },
+                    _ => (),
+                };
+                request_builder = request_builder.json(&map);
+                
+                match request_builder.send() {
+                    Ok(res) => Ok(res.text()?),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
+            PushCommands::Update {
+                iden,
+                dismissed,
+            } => {
+                let client = reqwest::blocking::Client::new();
+
+                let mut request_builder = client
+                    .post(format!("https://api.pushbullet.com/v2/devices/{}", iden))
+                    .header("Access-Token", access_token);
+
+                match dismissed {
+                    Some(dismissed) => {
+                        request_builder = request_builder.json(&json!({"dismissed": dismissed}));
+                    },
+                    _ => (),
+                }
+
+                match request_builder.send() {
+                    Ok(res) => Ok(res.text()?),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
+            PushCommands::Delete { iden  } => {
+                let client = reqwest::blocking::Client::new();
+
+                let request_builder = client
+                    .delete(format!("https://api.pushbullet.com/v2/pushes/{}", iden))
+                    .header("Access-Token", access_token);
+
+                match request_builder.send() {
+                    Ok(res) => Ok(res.text()?),
+                    Err(e) => Err(Box::new(e)),
+                }
+            }
+            PushCommands::DeleteAll => {
+                let client = reqwest::blocking::Client::new();
+
+                let request_builder = client
+                    .delete("https://api.pushbullet.com/v2/pushes")
                     .header("Access-Token", access_token);
 
                 match request_builder.send() {
