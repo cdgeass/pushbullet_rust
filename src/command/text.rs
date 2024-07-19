@@ -47,6 +47,7 @@ pub struct UpdateRequest {
 
 #[derive(Subcommand)]
 pub enum TextCommands {
+    /// Create a new text. The text will automatically be deleted after an hour whether it has been sent or not.
     Create {
         /// Map of values specifying this text message.
         #[arg(long)]
@@ -61,6 +62,7 @@ pub enum TextCommands {
         skip_delete_file: Option<bool>,
     },
 
+    /// Update a text. If the text has already been sent this will not affect the message.
     Update {
         /// Unique identifier for this object
         iden: String,
@@ -74,6 +76,7 @@ pub enum TextCommands {
         skip_delete_file: Option<bool>,
     },
 
+    /// Delete a text, canceling it if it has not already been sent. If there is an attached file and skip_delete_file has not been set, the file will be deleted.
     Delete {
         /// Unique identifier for this object
         iden: String,

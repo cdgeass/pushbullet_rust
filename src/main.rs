@@ -24,6 +24,26 @@ fn main() {
                 Ok(res) => println!("{res}"),
                 Err(e) => panic!("{e:?}"),
             },
+            Push(push_commands) => match push_commands.request(&access_token) {
+                Ok(res) => println!("{res}"),
+                Err(e) => panic!("{e:?}"),
+            },
+            Channel(channel_commands) => match channel_commands.request(&access_token) {
+                Ok(res) => println!("{res}"),
+                Err(e) => panic!("{e:?}"),
+            },
+            Subscription(subscription_commands) => match subscription_commands.request(&access_token) {
+                Ok(res) => println!("{res}"),
+                Err(e) => panic!("{e:?}"),
+            },
+            Text(text_commands) => match text_commands.request(&access_token) {
+                Ok(res) => println!("{res}"),
+                Err(e) => panic!("{e:?}"),
+            },
+            User(user_commands) => match user_commands.request(&access_token) {
+                Ok(res) => println!("{res}"),
+                Err(e) => panic!("{e:?}"),
+            },
             _ => (),
         }
     }
