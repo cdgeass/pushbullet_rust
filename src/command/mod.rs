@@ -1,5 +1,8 @@
 mod command;
-mod handle;
+mod chat;
+mod device;
+mod push;
+mod channel;
+mod subscription;
 
 pub use command::*;
-pub use handle::*;
