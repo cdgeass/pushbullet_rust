@@ -3,7 +3,7 @@ use serde::Serialize;
 use super::Request;
 
 #[derive(Debug, Serialize, Args)]
-struct CreateRequest {
+pub struct CreateRequest {
     /// Globally unique identifier for this channel, chosen by the channel creator
     #[arg(long)]
     tag: Option<String>,
@@ -37,7 +37,7 @@ struct CreateRequest {
 }
 
 #[derive(Debug, Serialize)]
-struct CreateFilter {
+pub struct CreateFilter {
 
     /// Field to match filter against, only "title" is currently supported
     field: Option<String>,

@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{channel::ChannelCommands, chat::ChatCommands, device::DeviceCommands, push::PushCommands, subscription::SubscriptionCommands};
+use super::{channel::ChannelCommands, chat::ChatCommands, device::DeviceCommands, push::PushCommands, subscription::SubscriptionCommands, text::TextCommands};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -49,6 +49,10 @@ pub enum Commands {
     /// Subscribe to channels to receive any updates pushed to that channel.
     #[command(subcommand)]
     Subscription(SubscriptionCommands),
+
+    /// Send text messages (SMS) to one phone number or group messages (MMS) to mulitple phone numbers. Also supports sending picture messages. Text messages are queued and sent as soon as possible. If the sending device does not come online and sync within 1 hour, the message is canceled and will not send.
+    #[command(subcommand)]
+    Text(TextCommands),
 }
 
 pub fn set_access_token(access_token: &str) -> io::Result<()> {
