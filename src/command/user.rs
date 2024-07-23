@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use reqwest::blocking::RequestBuilder;
 
 use super::Request;
 
@@ -9,18 +10,15 @@ pub enum UserCommands {
 }
 
 impl Request for UserCommands {
-    fn request(&self, access_token: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn build_request(
+        &self,
+        access_token: &str,
+    ) -> Result<RequestBuilder, Box<dyn std::error::Error>> {
         match self {
             UserCommands::Get => {
-                let response_result = reqwest::blocking::Client::new()
-                    .get("https://api.pushbullet.com/v2/users/me")
-                    .header("Access-Token", access_token)
-                    .send();
-
-                match response_result {
-                    Ok(response) => Ok(response.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_bulder =
+                    reqwest::blocking::Client::new().get("https://api.pushbullet.com/v2/users/me");
+                Ok(request_bulder)
             }
         }
     }

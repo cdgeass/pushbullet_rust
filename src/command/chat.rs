@@ -1,6 +1,8 @@
-use std::{collections::HashMap, error::Error};
+use std::error::Error;
 
 use clap::Subcommand;
+use reqwest::blocking::RequestBuilder;
+use serde::{Deserialize, Serialize};
 
 use super::{PaginationArgs, Request};
 
@@ -13,7 +15,10 @@ pub enum ChatCommands {
     Create {
         /// Email of person to create chat with (does not have to be a Pushbullet user)
         #[arg(long)]
-        email: String,
+        email: Option<String>,
+
+        #[arg(long)]
+        data_binary: Option<String>,
     },
 
     /// Update existing chat object.
@@ -24,6 +29,9 @@ pub enum ChatCommands {
         /// true to mute the grant, false to unmute it
         #[arg(long)]
         muted: Option<bool>,
+
+        #[arg(long)]
+        data_binary: Option<String>,
     },
 
     /// Delete a chat object.
@@ -33,75 +41,70 @@ pub enum ChatCommands {
     },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateRequest {
+    /// Email of person to create chat with (does not have to be a Pushbullet user)
+    /// Example: "carmack@idsoftware.com"
+    email: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateRequest {
+    /// true to mute the grant, false to unmute it
+    muted: Option<bool>,
+}
+
 impl Request for ChatCommands {
-    fn request(&self, access_token: &str) -> Result<String, Box<dyn Error>> {
+    fn build_request(&self, access_token: &str) -> Result<RequestBuilder, Box<dyn Error>> {
         match self {
             ChatCommands::List(args) => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
+                let request_builder = reqwest::blocking::Client::new()
                     .get("https://api.pushbullet.com/v2/chats")
-                    .header("Access-Token", access_token);
-
-                let mut query: Vec<(String, String)> = vec![];
-                if let Some(cursor) = &args.cursor {
-                    query.push((String::from("cursor"), cursor.to_owned()));
-                }
-                if let Some(limit) = &args.limit {
-                    query.push((String::from("limit"), limit.to_string()));
-                }
-                request_builder = request_builder.query(&query);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .query(&args.to_query());
+                Ok(request_builder)
             }
-            ChatCommands::Create { email } => {
-                let mut map = HashMap::new();
-                map.insert("email", email.to_owned());
-
-                let client = reqwest::blocking::Client::new();
-
-                let request_builder = client
+            ChatCommands::Create { email, data_binary } => {
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        }
+                    },
+                    None => CreateRequest {
+                        email: email.clone(),
+                    },
+                };
+                let request_builder = reqwest::blocking::Client::new()
                     .post("https://api.pushbullet.com/v2/chats")
-                    .header("Access-Token", access_token)
-                    .json(&map);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .json(&request);
+                Ok(request_builder)
             }
-            ChatCommands::Update { iden, muted } => {
-                let mut map = HashMap::new();
-                if let Some(muted) = muted {
-                    map.insert("muted", muted.to_owned());
-                }
-
-                let client = reqwest::blocking::Client::new();
-
-                let request_builder = client
+            ChatCommands::Update {
+                iden,
+                muted,
+                data_binary,
+            } => {
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        }
+                    },
+                    None => UpdateRequest {
+                        muted: muted.clone(),
+                    },
+                };
+                let request_builder = reqwest::blocking::Client::new()
                     .post(format!("https://api.pushbullet.com/v2/chats/{}", iden))
-                    .header("Access-Token", access_token)
-                    .json(&map);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .json(&request);
+                Ok(request_builder)
             }
             ChatCommands::Delete { iden } => {
-                let client = reqwest::blocking::Client::new();
-
-                let request_builder = client
-                    .delete(format!("https://api.pushbullet.com/v2/chats/{}", iden))
-                    .header("Access-Token", access_token);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder = reqwest::blocking::Client::new()
+                    .delete(format!("https://api.pushbullet.com/v2/chats/{}", iden));
+                Ok(request_builder)
             }
         }
     }

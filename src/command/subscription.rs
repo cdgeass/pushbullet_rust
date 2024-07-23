@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-
 use clap::Subcommand;
+use reqwest::blocking::RequestBuilder;
+use serde::{Deserialize, Serialize};
 
 use super::{PaginationArgs, Request};
 
@@ -13,6 +13,9 @@ pub enum SubscriptionCommands {
         /// Unique tag for the channel to subscribe to
         #[arg(long)]
         channel_tag: Option<String>,
+
+        #[arg(long)]
+        data_binary: Option<String>,
     },
 
     Update {
@@ -22,6 +25,9 @@ pub enum SubscriptionCommands {
         /// true to mute the grant, false to unmute it
         #[arg(long)]
         muted: Option<bool>,
+
+        #[arg(long)]
+        data_binary: Option<String>,
     },
 
     Delete {
@@ -40,78 +46,85 @@ pub enum SubscriptionCommands {
     },
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateRequest {
+    /// Unique tag for the channel to subscribe to
+    channel_tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateRequest {
+    /// true to mute the grant, false to unmute it
+    muted: Option<bool>,
+}
+
 impl Request for SubscriptionCommands {
-    fn request(&self, access_token: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn build_request(
+        &self,
+        access_token: &str,
+    ) -> Result<RequestBuilder, Box<dyn std::error::Error>> {
         match self {
-            SubscriptionCommands::List(request) => {
-                let mut query = vec![];
-                if let Some(cursor) = &request.cursor {
-                    query.push((String::from("cursor"), cursor.to_owned()));
-                }
-                if let Some(limit) = request.limit {
-                    query.push((String::from("limit"), limit.to_string()));
-                }
-
-                let response_result = reqwest::blocking::Client::new()
+            SubscriptionCommands::List(args) => {
+                let request_builder = reqwest::blocking::Client::new()
                     .get("https://api.pushbullet.com/v2/subscriptions")
-                    .header("Access-Token", access_token)
-                    .query(&query)
-                    .send();
-
-                match response_result {
-                    Ok(response) => Ok(response.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .query(&args.to_query());
+                Ok(request_builder)
             }
-            SubscriptionCommands::Create { channel_tag } => {
-                let mut map = HashMap::new();
-                if let Some(channel_tag) = channel_tag {
-                    map.insert(String::from("channel_tag"), channel_tag.to_owned());
-                }
-
-                let response_result = reqwest::blocking::Client::new()
+            SubscriptionCommands::Create {
+                channel_tag,
+                data_binary,
+            } => {
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        }
+                    },
+                    None => CreateRequest {
+                        channel_tag: channel_tag.clone(),
+                    },
+                };
+                let request_builder = reqwest::blocking::Client::new()
                     .post("https://api.pushbullet.com/v2/subscriptions")
-                    .header("Access-Token", access_token)
-                    .json(&map)
-                    .send();
-
-                match response_result {
-                    Ok(response) => Ok(response.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .json(&request);
+                Ok(request_builder)
             }
-            SubscriptionCommands::Update { iden, muted } => {
-                let mut map = HashMap::new();
-                if let Some(muted) = muted {
-                    map.insert(String::from("muted"), muted.to_owned());
-                }
-
-                let response_result = reqwest::blocking::Client::new()
+            SubscriptionCommands::Update {
+                iden,
+                muted,
+                data_binary,
+            } => {
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        }
+                    },
+                    None => UpdateRequest {
+                        muted: muted.clone(),
+                    },
+                };
+                let request_builder = reqwest::blocking::Client::new()
                     .post(format!(
                         "https://api.pushbullet.com/v2/subscriptions/{}",
                         iden
                     ))
-                    .header("Access-Token", access_token)
-                    .json(&map)
-                    .send();
-
-                match response_result {
-                    Ok(response) => Ok(response.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .json(&request);
+                Ok(request_builder)
             }
-            SubscriptionCommands::Delete {iden} => {
-                let response_result = reqwest::blocking::Client::new()
-                    .delete(format!("https://api.pushbullet.com/v2/subscriptions/{}", iden))
-                    .header("Access-Token", access_token)
-                    .send();
-
-                match response_result {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
-            },
-            SubscriptionCommands::ChannelInfo { tag, no_recent_pushed, } => {
+            SubscriptionCommands::Delete { iden } => {
+                let request_builder = reqwest::blocking::Client::new().delete(format!(
+                    "https://api.pushbullet.com/v2/subscriptions/{}",
+                    iden
+                ));
+                Ok(request_builder)
+            }
+            SubscriptionCommands::ChannelInfo {
+                tag,
+                no_recent_pushed,
+            } => {
                 let mut query = vec![];
                 if let Some(tag) = tag {
                     query.push(tag.to_owned());
@@ -119,17 +132,11 @@ impl Request for SubscriptionCommands {
                 if let Some(no_recent_pushed) = no_recent_pushed {
                     query.push(no_recent_pushed.to_string());
                 }
-
-                let response_result = reqwest::blocking::Client::new()
+                let request_builder = reqwest::blocking::Client::new()
                     .get("https://api.pushbullet.com/v2/channel-info")
-                    .header("Access-Token", access_token)
-                    .send();
-
-                match response_result {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
-            },
+                    .query(&query);
+                Ok(request_builder)
+            }
         }
     }
 }

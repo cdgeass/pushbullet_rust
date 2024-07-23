@@ -3,6 +3,10 @@ name = "pushbullet_rust"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "pb"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.5.8", features = ["derive"] }
 magic = "0.16.2"

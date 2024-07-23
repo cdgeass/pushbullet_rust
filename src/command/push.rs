@@ -1,40 +1,59 @@
-use std::{collections::HashMap, error::Error};
+use std::error::Error;
 
 use clap::{Args, Subcommand};
-use reqwest::blocking::multipart;
-use serde_json::json;
+use reqwest::blocking::RequestBuilder;
+use serde::{Deserialize, Serialize};
 
-use super::{upload_request, Request};
+use super::{upload, upload_request, Request};
 
 #[derive(Args)]
-pub struct PushPaginationArgs {}
+pub struct PaginationArgs {
+    /// Request pushes modified after this timestamp
+    #[arg(long)]
+    modified_after: Option<String>,
+
+    /// Don't return deleted pushes
+    #[arg(long)]
+    active: Option<bool>,
+
+    /// When listing objects, if you receive a cursor in the response, it means the results are on multiple pages. To request the next page of results, use this cursor as the parameter cursor in the next request.
+    #[arg(long)]
+    cursor: Option<String>,
+
+    /// You can specify a limit parameter that return a list of objects to get a smaller number of objects on each page.
+    #[arg(long, default_value = "500")]
+    limit: Option<i32>,
+}
+
+impl PaginationArgs {
+    pub fn to_query(&self) -> Vec<(String, String)> {
+        let mut query: Vec<(String, String)> = vec![];
+        if let Some(modified_after) = &self.modified_after {
+            query.push((String::from("modified_after"), modified_after.to_owned()));
+        }
+        if let Some(active) = self.active {
+            query.push((String::from("active"), active.to_string()));
+        }
+        if let Some(cursor) = &self.cursor {
+            query.push((String::from("cursor"), cursor.to_owned()));
+        }
+        if let Some(limit) = self.limit {
+            query.push((String::from("limit"), limit.to_string()));
+        }
+        query
+    }
+}
 
 #[derive(Subcommand)]
 pub enum PushCommands {
     /// Request push history.
-    List {
-        /// Request pushes modified after this timestamp
-        #[arg(long)]
-        modified_after: Option<String>,
-
-        /// Don't return deleted pushes
-        #[arg(long)]
-        active: Option<bool>,
-
-        /// When listing objects, if you receive a cursor in the response, it means the results are on multiple pages. To request the next page of results, use this cursor as the parameter cursor in the next request.
-        #[arg(long)]
-        cursor: Option<String>,
-
-        /// You can specify a limit parameter that return a list of objects to get a smaller number of objects on each page.
-        #[arg(long, default_value = "500")]
-        limit: Option<i32>,
-    },
+    List(PaginationArgs),
 
     /// Send a push to a device or another person.
     Create {
         /// Type of the push, one of "note", "file", "link".
         #[arg(long, name = "type")]
-        t: String,
+        t: Option<String>,
 
         /// Title of the push, used for all types of pushes
         #[arg(long)]
@@ -83,6 +102,9 @@ pub enum PushCommands {
         /// Unique identifier set by the client, used to identify a push in case you receive it from /v2/everything before the call to /v2/pushes has completed. This should be a unique value. Pushes with guid set are mostly idempotent, meaning that sending another push with the same guid is unlikely to create another push (it will return the previously created push).
         #[arg(long)]
         guid: Option<String>,
+
+        #[arg(long)]
+        data_binary: Option<String>,
     },
 
     /// Update a push.
@@ -93,6 +115,9 @@ pub enum PushCommands {
         /// Marks a push as having been dismissed by the user, will cause any notifications for the push to be hidden if possible.
         #[arg(long)]
         dismissed: Option<bool>,
+
+        #[arg(long)]
+        data_binary: Option<String>,
     },
 
     /// Delete a push.
@@ -105,35 +130,63 @@ pub enum PushCommands {
     DeleteAll,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateRequest {
+    /// Type of the push, one of "note", "file", "link".
+    #[serde(rename = "type")]
+    t: Option<String>,
+
+    /// Title of the push, used for all types of pushes
+    title: Option<String>,
+
+    /// Body of the push, used for all types of pushes
+    body: Option<String>,
+
+    /// URL field, used for type="link" pushes
+    url: Option<String>,
+
+    /// File name, used for type="file" pushes
+    file_name: Option<String>,
+
+    /// File mime type, used for type="file" pushes
+    file_type: Option<String>,
+
+    /// File download url, used for type="file" pushes
+    file_url: Option<String>,
+
+    /// Device iden of the sending device. Optional.
+    source_device_iden: Option<String>,
+
+    /// Device iden of the target device, if sending to a single device. Appears as target_device_iden on the push.
+    device_iden: Option<String>,
+
+    /// Client iden of the target client, sends a push to all users who have granted access to this client. The current user must own this client.
+    client_iden: Option<String>,
+
+    /// Channel tag of the target channel, sends a push to all people who are subscribed to this channel. The current user must own this channel.
+    channel_tag: Option<String>,
+
+    /// Email address to send the push to. If there is a pushbullet user with this address, they get a push, otherwise they get an email.
+    email: Option<String>,
+
+    /// Unique identifier set by the client, used to identify a push in case you receive it from /v2/everything before the call to /v2/pushes has completed. This should be a unique value. Pushes with guid set are mostly idempotent, meaning that sending another push with the same guid is unlikely to create another push (it will return the previously created push).
+    guid: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateRequest {
+    /// Marks a push as having been dismissed by the user, will cause any notifications for the push to be hidden if possible.
+    dismissed: Option<bool>,
+}
+
 impl Request for PushCommands {
-    fn request(&self, access_token: &str) -> Result<String, Box<dyn Error>> {
+    fn build_request(&self, access_token: &str) -> Result<RequestBuilder, Box<dyn Error>> {
         match self {
-            PushCommands::List { modified_after, active, cursor, limit, } => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
+            PushCommands::List(args) => {
+                let request_builder = reqwest::blocking::Client::new()
                     .get("https://api.pushbullet.com/v2/devices")
-                    .header("Access-Token", access_token);
-
-                let mut query: Vec<(String, String)> = vec![];
-                if let Some(modified_after) = modified_after {
-                    query.push((String::from("modified_after"), modified_after.to_owned()));
-                }
-                if let Some(active) = active {
-                    query.push((String::from("active"), active.to_string()));
-                }
-                if let Some(cursor) = cursor {
-                    query.push((String::from("cursor"), cursor.to_owned()));
-                }
-                if let Some(limit) = limit {
-                    query.push((String::from("limit"), limit.to_string()));
-                }
-                request_builder = request_builder.query(&query);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .query(&args.to_query());
+                Ok(request_builder)
             }
             PushCommands::Create {
                 t,
@@ -149,141 +202,102 @@ impl Request for PushCommands {
                 channel_tag,
                 email,
                 guid,
+                data_binary,
             } => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
-                    .post("https://api.pushbullet.com/v2/devices")
-                    .header("Access-Token", access_token);
-
-                let mut map = HashMap::new();
-                map.insert("type", t.to_owned());
-                if let Some(source_device_iden) = source_device_iden {
-                    map.insert("source_device_iden", source_device_iden.to_owned());
-                }
-                if let Some(device_iden) = device_iden {
-                    map.insert("device_iden", device_iden.to_owned());
-                }
-                if let Some(client_iden) = client_iden {
-                    map.insert("client_iden", client_iden.to_owned());
-                }
-                if let Some(channel_tag) = channel_tag {
-                    map.insert("channel_tag", channel_tag.to_owned());
-                }
-                if let Some(email) = email {
-                    map.insert("email", email.to_owned());
-                }
-                if let Some(guid) = guid {
-                    map.insert("guid", guid.to_owned());
-                }
-
-                match t.as_str() {
-                    "note" => {
-                        if let Some(title) = title {
-                            map.insert("title", title.to_owned());
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
                         }
-                        if let Some(body) = body {
-                            map.insert("body", body.to_owned());
-                        }
-                    }
-                    "link" => {
-                        if let Some(title) = title {
-                            map.insert("title", title.to_owned());
-                        }
-                        if let Some(body) = body {
-                            map.insert("body", body.to_owned());
-                        }
-                        if let Some(url) = url {
-                            map.insert("url", url.to_owned());
-                        }
-                    }
-                    "file" => {
-                        let file_name = match file_name {
-                            Some(file_name) => file_name,
-                            None => todo!(),
-                        };
+                    },
+                    None => {
+                        let mut file_name = file_name.clone();
+                        let mut file_type = file_type.clone();
+                        let mut file_url = file_url.clone();
 
-                        match upload_request(
-                            access_token.to_owned(),
-                            file_name.to_owned(),
-                            file_type.to_owned(),
-                        ) {
-                            Ok(response) => {
-                                let upload_url = response.upload_url;
-                                let form = multipart::Form::new().file("file", &file_name)?;
-                                reqwest::blocking::Client::new()
-                                    .post(upload_url)
-                                    .header("Access-Token", access_token)
-                                    .multipart(form)
-                                    .send()?;
-
-                                if let Some(title) = title {
-                                    map.insert("title", title.to_owned());
-                                }
-                                if let Some(body) = body {
-                                    map.insert("body", body.to_owned());
-                                }
-                                if let Some(url) = url {
-                                    map.insert("url", url.to_owned());
-                                }
-                                map.insert("file_name", response.file_name.to_owned());
-                                map.insert("file_type", response.file_type.to_owned());
-                                map.insert("file_url", response.file_url.to_owned());
+                        let file_name_clone = file_name.clone();
+                        if let Some(t) = t {
+                            if t == "file" && file_name_clone.is_some() {
+                                match upload_request(
+                                    access_token,
+                                    file_name.unwrap(),
+                                    file_type.to_owned(),
+                                ) {
+                                    Ok(response) => {
+                                        let upload_url = response.upload_url;
+                                        match upload(access_token, file_name_clone.unwrap().as_str(), &upload_url)
+                                        {
+                                            Ok(_) => {
+                                                file_name = Some(response.file_name);
+                                                file_type = Some(response.file_type);
+                                                file_url = Some(response.file_url);
+                                            }
+                                            Err(error) => {
+                                                return Err(error);
+                                            }
+                                        };
+                                    }
+                                    Err(error) => {
+                                        return Err(error);
+                                    }
+                                };
                             }
-                            Err(_) => todo!(),
+                        }
+
+                        CreateRequest {
+                            t: t.clone(),
+                            title: title.clone(),
+                            body: body.clone(),
+                            url: url.clone(),
+                            file_name: file_name,
+                            file_type: file_type,
+                            file_url: file_url,
+                            source_device_iden: source_device_iden.clone(),
+                            device_iden: device_iden.clone(),
+                            client_iden: client_iden.clone(),
+                            channel_tag: channel_tag.clone(),
+                            email: email.clone(),
+                            guid: guid.clone(),
                         }
                     }
-                    _ => (),
                 };
-                request_builder = request_builder.json(&map);
 
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder = reqwest::blocking::Client::new()
+                    .post("https://api.pushbullet.com/v2/devices")
+                    .json(&request);
+                Ok(request_builder)
             }
-            PushCommands::Update { iden, dismissed } => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
+            PushCommands::Update {
+                iden,
+                dismissed,
+                data_binary,
+            } => {
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        }
+                    },
+                    None => UpdateRequest {
+                        dismissed: dismissed.clone(),
+                    },
+                };
+                let request_builder = reqwest::blocking::Client::new()
                     .post(format!("https://api.pushbullet.com/v2/devices/{}", iden))
-                    .header("Access-Token", access_token);
-
-                match dismissed {
-                    Some(dismissed) => {
-                        request_builder = request_builder.json(&json!({"dismissed": dismissed}));
-                    }
-                    _ => (),
-                }
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .json(&request);
+                Ok(request_builder)
             }
             PushCommands::Delete { iden } => {
-                let client = reqwest::blocking::Client::new();
-
-                let request_builder = client
-                    .delete(format!("https://api.pushbullet.com/v2/pushes/{}", iden))
-                    .header("Access-Token", access_token);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder = reqwest::blocking::Client::new()
+                    .delete(format!("https://api.pushbullet.com/v2/pushes/{}", iden));
+                Ok(request_builder)
             }
             PushCommands::DeleteAll => {
-                let client = reqwest::blocking::Client::new();
-
-                let request_builder = client
-                    .delete("https://api.pushbullet.com/v2/pushes")
-                    .header("Access-Token", access_token);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder =
+                    reqwest::blocking::Client::new().delete("https://api.pushbullet.com/v2/pushes");
+                Ok(request_builder)
             }
         }
     }

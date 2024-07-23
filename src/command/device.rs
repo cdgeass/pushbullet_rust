@@ -1,8 +1,8 @@
 use std::error::Error;
 
 use clap::Subcommand;
-use serde::Serialize;
-use serde_json::Value;
+use reqwest::blocking::RequestBuilder;
+use serde::{Deserialize, Serialize};
 
 use super::{PaginationArgs, Request};
 
@@ -39,11 +39,10 @@ pub enum DeviceCommands {
 
         /// true if the devices has SMS capability, currently only true for type="android" devices
         #[arg(long)]
-        has_sms: Option<String>,
+        has_sms: Option<bool>,
 
-        /// reques with body like {"app_version":8623,"manufacturer":"Apple","model":"iPhone 5s (GSM)","nickname":"Elon Musk's iPhone","push_token":"production:f73be0ee7877c8c7fa69b1468cde764f"}'
         #[arg(long)]
-        body: Option<String>,
+        data_binary: Option<String>,
     },
 
     /// Update an existing device.
@@ -77,7 +76,10 @@ pub enum DeviceCommands {
 
         /// true if the devices has SMS capability, currently only true for type="android" devices
         #[arg(long)]
-        has_sms: Option<String>,
+        has_sms: Option<bool>,
+
+        #[arg(long)]
+        data_binary: Option<String>
     },
 
     /// Delete a device.
@@ -87,40 +89,76 @@ pub enum DeviceCommands {
     },
 }
 
-#[derive(Debug, Serialize)]
-struct Device {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateRequest {
+    /// Name to use when displaying the device
+    /// Example: "Elon Musk's iPhone"
     nickname: Option<String>,
+
+    /// Model of the device
+    /// Example: "iPhone 5s (GSM)"
     model: Option<String>,
+
+    /// Manufacturer of the device
+    /// Example: "Apple"
     manufacturer: Option<String>,
+
+    /// Platform-specific push token. If you are making your own device, leave this blank and you can listen for events on the Realtime Event Stream.
+    /// Example: "production:f73be0ee7877c8c7fa69b1468cde764f"
     push_token: Option<String>,
+
+    /// Version of the Pushbullet application installed on the device
+    /// Example: 8623
     app_version: Option<i32>,
+
+    /// Icon to use for this device, can be an arbitrary string. Commonly used values are: "desktop", "browser", "website", "laptop", "tablet", "phone", "watch", "system"
+    /// Example: "ios"
     icon: Option<String>,
-    has_sms: Option<String>,
+
+    /// true if the devices has SMS capability, currently only true for type="android" devices
+    /// Example: true
+    has_sms: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateRequest {
+    /// Name to use when displaying the device
+    /// Example: "Elon Musk's iPhone"
+    nickname: Option<String>,
+
+    /// Model of the device
+    /// Example: "iPhone 5s (GSM)"
+    model: Option<String>,
+
+    /// Manufacturer of the device
+    /// Example: "Apple"
+    manufacturer: Option<String>,
+
+    /// Platform-specific push token. If you are making your own device, leave this blank and you can listen for events on the Realtime Event Stream.
+    /// Example: "production:f73be0ee7877c8c7fa69b1468cde764f"
+    push_token: Option<String>,
+
+    /// Version of the Pushbullet application installed on the device
+    /// Example: 8623
+    app_version: Option<i32>,
+
+    /// Icon to use for this device, can be an arbitrary string. Commonly used values are: "desktop", "browser", "website", "laptop", "tablet", "phone", "watch", "system"
+    /// Example: "ios"
+    icon: Option<String>,
+
+    /// true if the devices has SMS capability, currently only true for type="android" devices
+    /// Example: true
+    has_sms: Option<bool>,
 }
 
 impl Request for DeviceCommands {
-    fn request(&self, access_token: &str) -> Result<String, Box<dyn Error>> {
+    fn build_request(&self, access_token: &str) -> Result<RequestBuilder, Box<dyn Error>> {
         match self {
             DeviceCommands::List(args) => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
+                let request_builder = reqwest::blocking::Client::new()
                     .get("https://api.pushbullet.com/v2/devices")
-                    .header("Access-Token", access_token);
-
-                let mut query: Vec<(String, String)> = vec![];
-                if let Some(cursor) = &args.cursor {
-                    query.push((String::from("cursor"), cursor.to_string()));
-                }
-                if let Some(limit) = &args.limit {
-                    query.push((String::from("limit"), limit.to_string()));
-                }
-                request_builder = request_builder.query(&query);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                    .query(&args.to_query());
+                Ok(request_builder)
             }
             DeviceCommands::Create {
                 nickname,
@@ -130,38 +168,29 @@ impl Request for DeviceCommands {
                 app_version,
                 icon,
                 has_sms,
-                body,
+                data_binary,
             } => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
-                    .post("https://api.pushbullet.com/v2/devices")
-                    .header("Access-Token", access_token);
-
-                let json_data = match body {
-                    Some(body) => {
-                        let json: Value = serde_json::from_str(body)?;
-                        json
-                    }
-                    None => {
-                        let device = Device {
-                            nickname: nickname.clone(),
-                            model: model.clone(),
-                            manufacturer: manufacturer.clone(),
-                            push_token: push_token.clone(),
-                            app_version: app_version.clone(),
-                            icon: icon.clone(),
-                            has_sms: has_sms.clone(),
-                        };
-                        serde_json::to_value(&device)?
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        },
+                    },
+                    None => CreateRequest {
+                        nickname: nickname.clone(),
+                        model: model.clone(),
+                        manufacturer: manufacturer.clone(),
+                        push_token: push_token.clone(),
+                        app_version: app_version.clone(),
+                        icon: icon.clone(),
+                        has_sms: has_sms.clone(),
                     }
                 };
-                request_builder = request_builder.json(&json_data);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder = reqwest::blocking::Client::new()
+                    .post("https://api.pushbullet.com/v2/devices")
+                    .json(&request);
+                Ok(request_builder)
             }
             DeviceCommands::Update {
                 iden,
@@ -172,40 +201,34 @@ impl Request for DeviceCommands {
                 app_version,
                 icon,
                 has_sms,
+                data_binary,
             } => {
-                let client = reqwest::blocking::Client::new();
-
-                let mut request_builder = client
-                    .post(format!("https://api.pushbullet.com/v2/devices/{}", iden))
-                    .header("Access-Token", access_token);
-
-                let device = Device {
-                    nickname: nickname.clone(),
-                    model: model.clone(),
-                    manufacturer: manufacturer.clone(),
-                    push_token: push_token.clone(),
-                    app_version: app_version.clone(),
-                    icon: icon.clone(),
-                    has_sms: has_sms.clone(),
+                let request = match data_binary {
+                    Some(data_binary) => match serde_json::from_str(&data_binary) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            return Err(Box::new(error));
+                        },
+                    },
+                    None => UpdateRequest {
+                        nickname: nickname.clone(),
+                        model: model.clone(),
+                        manufacturer: manufacturer.clone(),
+                        push_token: push_token.clone(),
+                        app_version: app_version.clone(),
+                        icon: icon.clone(),
+                        has_sms: has_sms.clone(),
+                    }
                 };
-                request_builder = request_builder.json(&device);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder = reqwest::blocking::Client::new()
+                    .post(format!("https://api.pushbullet.com/v2/devices/{}", iden))
+                    .json(&request);
+                Ok(request_builder)
             }
             DeviceCommands::Delete { iden } => {
-                let client = reqwest::blocking::Client::new();
-
-                let request_builder = client
-                    .delete(format!("https://api.pushbullet.com/v2/devices/{}", iden))
-                    .header("Access-Token", access_token);
-
-                match request_builder.send() {
-                    Ok(res) => Ok(res.text()?),
-                    Err(e) => Err(Box::new(e)),
-                }
+                let request_builder = reqwest::blocking::Client::new()
+                    .delete(format!("https://api.pushbullet.com/v2/devices/{}", iden));
+                Ok(request_builder)
             }
         }
     }

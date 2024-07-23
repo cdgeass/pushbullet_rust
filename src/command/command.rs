@@ -1,10 +1,20 @@
-use std::{env, error::Error, fs::{self, File}, io::{self, ErrorKind, Write}, path::{Path, PathBuf}};
+use std::{
+    env,
+    error::Error,
+    fs::{self, File},
+    io::{self, ErrorKind, Write},
+    path::{Path, PathBuf},
+};
 
 use clap::{Args, Parser, Subcommand};
+use reqwest::blocking::{multipart, Client, RequestBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{channel::ChannelCommands, chat::ChatCommands, device::DeviceCommands, push::PushCommands, subscription::SubscriptionCommands, text::TextCommands, user::UserCommands};
+use super::{
+    channel::ChannelCommands, chat::ChatCommands, device::DeviceCommands, push::PushCommands,
+    subscription::SubscriptionCommands, text::TextCommands, user::UserCommands,
+};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -22,6 +32,19 @@ pub struct PaginationArgs {
     /// You can specify a limit parameter that return a list of objects to get a smaller number of objects on each page.
     #[arg(long, default_value = "500")]
     pub limit: Option<i32>,
+}
+
+impl PaginationArgs {
+    pub fn to_query(&self) -> Vec<(String, String)> {
+        let mut query: Vec<(String, String)> = vec![];
+        if let Some(cursor) = &self.cursor {
+            query.push((String::from("cursor"), cursor.to_owned()));
+        }
+        if let Some(limit) = self.limit {
+            query.push((String::from("limit"), limit.to_string()));
+        }
+        query
+    }
 }
 
 #[derive(Subcommand)]
@@ -96,7 +119,7 @@ pub struct UploadRequestResponse {
 }
 
 pub fn upload_request(
-    access_token: String,
+    access_token: &str,
     file_name: String,
     file_type: Option<String>,
 ) -> Result<UploadRequestResponse, Box<dyn Error>> {
@@ -135,6 +158,43 @@ pub fn upload_request(
     }
 }
 
+pub fn upload(access_token: &str, file_name: &str, upload_url: &str) -> Result<(), Box<dyn Error>> {
+    let form = match multipart::Form::new().file("file", &file_name) {
+        Ok(form) => form,
+        Err(error) => {
+            return Err(Box::new(error));
+        }
+    };
+    let response_result = reqwest::blocking::Client::new()
+        .post(upload_url)
+        .header("Access-Token", access_token)
+        .multipart(form)
+        .send();
+    match response_result {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            return Err(Box::new(error));
+        }
+    }
+}
+
 pub trait Request {
-    fn request(&self, access_token: &str) -> Result<String, Box<dyn Error>>;
+    fn request(&self, access_token: &str) -> Result<String, Box<dyn Error>> {
+        let request_builder = match self.build_request(access_token) {
+            Ok(request_builder) => request_builder.header("Access-Token", access_token),
+            Err(error) => {
+                return Err(error);
+            }
+        };
+
+        match request_builder.send() {
+            Ok(response) => match response.text() {
+                Ok(text) => Ok(text),
+                Err(error) => Err(Box::new(error)),
+            },
+            Err(error) => Err(Box::new(error)),
+        }
+    }
+
+    fn build_request(&self, access_token: &str) -> Result<RequestBuilder, Box<dyn Error>>;
 }
