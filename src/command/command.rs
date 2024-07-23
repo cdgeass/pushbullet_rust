@@ -110,6 +110,13 @@ pub fn read_access_token() -> io::Result<String> {
     Ok(fs::read_to_string(path)?)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UploadRequestRequest {
+    pub file_name: Option<String>,
+
+    pub file_type: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UploadRequestResponse {
     pub file_name: String,
@@ -137,14 +144,15 @@ pub fn upload_request(
             final_file_type = cookie.file(&file_name).unwrap();
         }
     }
-
+    let real_file_name = path_buf.file_name().unwrap();
+    let request = UploadRequestRequest {
+        file_name: Some(real_file_name.to_os_string().into_string().unwrap()),
+        file_type: Some(final_file_type),
+    };
     let request_builder = reqwest::blocking::Client::new()
         .post("https://api.pushbullet.com/v2/upload-request")
         .header("Access-Token", access_token)
-        .json(&json!({
-            "file_name": path_buf.file_name(),
-            "file_type": final_file_type,
-        }));
+        .json(&request);
 
     match request_builder.send() {
         Ok(res) => match res.text() {

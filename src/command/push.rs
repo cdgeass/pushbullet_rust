@@ -184,7 +184,7 @@ impl Request for PushCommands {
         match self {
             PushCommands::List(args) => {
                 let request_builder = reqwest::blocking::Client::new()
-                    .get("https://api.pushbullet.com/v2/devices")
+                    .get("https://api.pushbullet.com/v2/pushes")
                     .query(&args.to_query());
                 Ok(request_builder)
             }
@@ -226,8 +226,11 @@ impl Request for PushCommands {
                                 ) {
                                     Ok(response) => {
                                         let upload_url = response.upload_url;
-                                        match upload(access_token, file_name_clone.unwrap().as_str(), &upload_url)
-                                        {
+                                        match upload(
+                                            access_token,
+                                            file_name_clone.unwrap().as_str(),
+                                            &upload_url,
+                                        ) {
                                             Ok(_) => {
                                                 file_name = Some(response.file_name);
                                                 file_type = Some(response.file_type);
@@ -264,7 +267,7 @@ impl Request for PushCommands {
                 };
 
                 let request_builder = reqwest::blocking::Client::new()
-                    .post("https://api.pushbullet.com/v2/devices")
+                    .post("https://api.pushbullet.com/v2/pushes")
                     .json(&request);
                 Ok(request_builder)
             }
@@ -285,7 +288,7 @@ impl Request for PushCommands {
                     },
                 };
                 let request_builder = reqwest::blocking::Client::new()
-                    .post(format!("https://api.pushbullet.com/v2/devices/{}", iden))
+                    .post(format!("https://api.pushbullet.com/v2/pushes/{}", iden))
                     .json(&request);
                 Ok(request_builder)
             }
